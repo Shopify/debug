@@ -56,4 +56,30 @@ module DEBUGGER__
       end
     end
   end
+
+  class DAPInstanceVariableTest < ProtocolTestCase
+    PROGRAM = <<~RUBY
+      1| @a = 1
+      2| @c = 3
+      3| @b = 2
+      4| @z = 4
+    RUBY
+
+    def test_ordering_instance_variables
+      run_protocol_scenario PROGRAM, cdp: false do
+        req_add_breakpoint 4
+        req_continue
+
+        locals = gather_variables
+
+        variables_reference = locals.find { |local| local[:name] == "%self" }[:variablesReference]
+        res = send_dap_request 'variables', variablesReference: variables_reference
+
+        instance_vars = res.dig(:body, :variables)
+        assert_equal instance_vars.map { |var| var[:name] }, ["#class", "@a", "@b", "@c"]
+
+        req_terminate_debuggee
+      end
+    end
+  end
 end
