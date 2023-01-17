@@ -997,9 +997,10 @@ module DEBUGGER__
       klass = M_CLASS.bind_call(obj)
 
       begin
+        puts "***here"
         klass.name || klass.to_s
-      rescue Exception => e
-        "<Error: #{e.message} (#{e.backtrace.first}>"
+      # rescue Exception => e
+      #   "<Error: #{e.message} (#{e.backtrace.first}>"
       end
     end
 
