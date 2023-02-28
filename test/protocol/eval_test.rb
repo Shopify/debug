@@ -23,5 +23,33 @@ module DEBUGGER__
         req_terminate_debuggee
       end
     end
+
+    def test_eval_workaround
+      run_protocol_scenario PROGRAM, cdp: false do
+        req_add_breakpoint 3
+        req_continue
+        send_evaluate_request(",b 5")
+        req_continue
+        assert_line_num 5
+        req_terminate_debuggee
+      end
+    end
+
+    def send_evaluate_request(expression)
+      res = send_dap_request 'stackTrace',
+                    threadId: 1,
+                    startFrame: 0,
+                    levels: 20
+      f_id = res.dig(:body, :stackFrames, 0, :id)
+      send_dap_request 'evaluate',
+                    expression: expression,
+                    frameId: f_id,
+                    context: "repl"
+      # the preset command we add in the previous request needs to be triggered
+      # by another session action (request in this case).
+      # in VS Code this naturally happens because it'll send a Scope request follow the
+      # evaluate request, but in our test we need to do it manually.
+      send_dap_request 'scopes', frameId: f_id
+    end
   end
 end
