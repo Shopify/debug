@@ -442,8 +442,10 @@ module DEBUGGER__
                           variablesReference: 0
             # Workaround for https://github.com/ruby/debug/issues/900
             # See https://github.com/Shopify/debug/pull/4 for more details
-            commands = [dbg_expr.split(';;').join("\n")]
-            ::DEBUGGER__::SESSION.add_preset_commands '#debugger', commands, kick: false, continue: false
+            commands = dbg_expr.split(';;')
+            commands.each do |cmd|
+              @q_msg << cmd
+            end
           else
             @q_msg << req
           end
