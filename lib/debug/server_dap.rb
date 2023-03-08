@@ -365,6 +365,11 @@ module DEBUGGER__
         end
       end
 
+      register_command 'terminate' do |_args, req|
+        send_response req
+        exit
+      end
+
       # test/protocol/step_raw_dap_test.rb
       register_command 'stepIn' do |_args, req|
         begin
@@ -505,9 +510,6 @@ module DEBUGGER__
         when 'continue'
           @q_msg << 'c'
           send_response req, allThreadsContinued: true
-        when 'terminate'
-          send_response req
-          exit
         else
           if respond_to? mid = "request_#{req['command']}"
             send mid, req
