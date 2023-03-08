@@ -17,6 +17,7 @@ module DEBUGGER__
       @width = 80
       @repl = true
       @session = nil
+      @commands = {} # used in UI_DAP
     end
 
     class Terminate < StandardError; end

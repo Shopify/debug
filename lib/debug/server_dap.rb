@@ -269,11 +269,53 @@ module DEBUGGER__
       retry
     end
 
+    class ServerCommand
+      def initialize(block)
+        @block = block
+      end
+
+      attr_reader :block
+    end
+
+    private def register_command *names, &b
+      cmd = ServerCommand.new(b)
+
+      names.each{|name|
+        @commands[name] = cmd
+      }
+    end
+
     def process
+      register_command('disconnect') do |args, req|
+        terminate = args.fetch("terminateDebuggee", false)
+
+        SESSION.clear_all_breakpoints
+        send_response req
+
+        if SESSION.in_subsession?
+          if terminate
+            @q_msg << 'kill!'
+          else
+            @q_msg << 'continue'
+          end
+        else
+          if terminate
+            @q_msg << 'kill!'
+            pause
+          end
+        end
+      end
+
       while req = recv_request
         raise "not a request: #{req.inspect}" unless req['type'] == 'request'
         args = req.dig('arguments')
 
+        if (cmd = @commands[req['command']])
+          cmd.block.call(args, req)
+          next
+        end
+
+        # andyw8
         case req['command']
 
         ## boot/configuration
@@ -358,25 +400,6 @@ module DEBUGGER__
           }
 
           send_response req, breakpoints: filters
-
-        when 'disconnect'
-          terminate = args.fetch("terminateDebuggee", false)
-
-          SESSION.clear_all_breakpoints
-          send_response req
-
-          if SESSION.in_subsession?
-            if terminate
-              @q_msg << 'kill!'
-            else
-              @q_msg << 'continue'
-            end
-          else
-            if terminate
-              @q_msg << 'kill!'
-              pause
-            end
-          end
 
         ## control
         when 'continue'
