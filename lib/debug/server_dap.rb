@@ -419,6 +419,11 @@ module DEBUGGER__
                       result: "Reverse Continue is not supported. Only \"Step back\" is supported."
       end
 
+      # test/protocol/disconnect_dap_test.rb
+      register_command 'pause' do |_args, req|
+        send_response req
+        Process.kill(UI_ServerBase::TRAP_SIGNAL, Process.pid)
+      end
 
       while req = recv_request
         raise "not a request: #{req.inspect}" unless req['type'] == 'request'
@@ -502,9 +507,6 @@ module DEBUGGER__
         when 'terminate'
           send_response req
           exit
-        when 'pause'
-          send_response req
-          Process.kill(UI_ServerBase::TRAP_SIGNAL, Process.pid)
         else
           if respond_to? mid = "request_#{req['command']}"
             send mid, req
