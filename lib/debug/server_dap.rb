@@ -309,6 +309,11 @@ module DEBUGGER__
         end
       end
 
+      # test/protocol/boot_config_raw_dap_test.rb
+      register_command 'setFunctionBreakpoints' do |_args, req|
+        send_response req
+      end
+
       ## control
 
       # test/protocol/next_raw_dap_test.rb
@@ -370,6 +375,7 @@ module DEBUGGER__
         exit
       end
 
+      # test/protocol/break_raw_dap_test.rb
       register_command 'continue' do |_args, req|
         @q_msg << 'c'
         send_response req, allThreadsContinued: true
@@ -477,10 +483,6 @@ module DEBUGGER__
                                     allThreadsStopped: true
             end
           end
-
-
-        when 'setFunctionBreakpoints'
-          send_response req
 
         when 'setExceptionBreakpoints'
           process_filter = ->(filter_id, cond = nil) {
