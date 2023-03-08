@@ -377,6 +377,32 @@ module DEBUGGER__
         end
       end
 
+      # test/protocol/finish_raw_dap_test.rb
+      register_command 'stepOut' do |_args, req|
+        begin
+          @session.check_postmortem
+          @q_msg << 'fin'
+          send_response req
+        rescue PostmortemError
+          send_response req,
+                        success: false, message: 'postmortem mode',
+                        result: "'stepOut' is not supported while postmortem mode"
+        end
+      end
+
+      # test/protocol/step_back_raw_dap_test.rb
+      register_command 'stepBack' do |_args, req|
+        @q_msg << req
+      end
+
+      # test/protocol/threads_test.rb
+      register_command 'threads' do |_args, req|
+        send_response req, threads: SESSION.managed_thread_clients.map{|tc|
+          { id: tc.id,
+            name: tc.name,
+          }
+        }
+      end
 
       while req = recv_request
         raise "not a request: #{req.inspect}" unless req['type'] == 'request'
@@ -457,16 +483,6 @@ module DEBUGGER__
         when 'continue'
           @q_msg << 'c'
           send_response req, allThreadsContinued: true
-        when 'stepOut'
-          begin
-            @session.check_postmortem
-            @q_msg << 'fin'
-            send_response req
-          rescue PostmortemError
-            send_response req,
-                          success: false, message: 'postmortem mode',
-                          result: "'stepOut' is not supported while postmortem mode"
-          end
         when 'terminate'
           send_response req
           exit
@@ -477,16 +493,6 @@ module DEBUGGER__
           send_response req,
                         success: false, message: 'cancelled',
                         result: "Reverse Continue is not supported. Only \"Step back\" is supported."
-        when 'stepBack'
-          @q_msg << req
-
-        ## query
-        when 'threads'
-          send_response req, threads: SESSION.managed_thread_clients.map{|tc|
-            { id: tc.id,
-              name: tc.name,
-            }
-          }
         when 'stackTrace',
              'scopes',
              'variables',
