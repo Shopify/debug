@@ -286,6 +286,7 @@ module DEBUGGER__
     end
 
     def process
+      # TODO: move out of `process`
       register_command('disconnect') do |args, req|
         terminate = args.fetch("terminateDebuggee", false)
 
