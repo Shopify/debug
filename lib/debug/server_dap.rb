@@ -277,11 +277,12 @@ module DEBUGGER__
       attr_reader :block
     end
 
+    @@registered_requests = {}
     private def register_command *names, &b
       cmd = ServerCommand.new(b)
 
       names.each{|name|
-        @registered_requests[name] = cmd
+        @@registered_requests[name] = cmd
       }
     end
 
@@ -326,7 +327,7 @@ module DEBUGGER__
         raise "not a request: #{req.inspect}" unless req['type'] == 'request'
         args = req.dig('arguments')
 
-        if (cmd = @registered_requests[req['command']])
+        if (cmd = @@registered_requests[req['command']])
           cmd.block.call(args, req)
           next
         end
