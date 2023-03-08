@@ -515,14 +515,6 @@ module DEBUGGER__
 
         if (cmd = @@registered_requests[req['command']])
           cmd.block.call(args, req)
-          next
-        end
-
-        # andyw8
-        case req['command']
-
-        when 'nothing'
-        ## control
         else
           if respond_to? mid = "request_#{req['command']}"
             send mid, req
