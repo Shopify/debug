@@ -404,6 +404,14 @@ module DEBUGGER__
         }
       end
 
+      register_command 'stackTrace',
+                       'scopes',
+                       'variables',
+                       'source',
+                       'completions' do |_args, req|
+        @q_msg << req
+      end
+
       while req = recv_request
         raise "not a request: #{req.inspect}" unless req['type'] == 'request'
         args = req.dig('arguments')
@@ -493,12 +501,6 @@ module DEBUGGER__
           send_response req,
                         success: false, message: 'cancelled',
                         result: "Reverse Continue is not supported. Only \"Step back\" is supported."
-        when 'stackTrace',
-             'scopes',
-             'variables',
-             'source',
-             'completions'
-          @q_msg << req
 
         else
           if respond_to? mid = "request_#{req['command']}"
