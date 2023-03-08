@@ -364,6 +364,19 @@ module DEBUGGER__
         end
       end
 
+      # test/protocol/step_raw_dap_test.rb
+      register_command 'stepIn' do |_args, req|
+        begin
+          @session.check_postmortem
+          @q_msg << 's'
+          send_response req
+        rescue PostmortemError
+          send_response req,
+                        success: false, message: 'postmortem mode',
+                        result: "'stepIn' is not supported while postmortem mode"
+        end
+      end
+
 
       while req = recv_request
         raise "not a request: #{req.inspect}" unless req['type'] == 'request'
@@ -444,17 +457,6 @@ module DEBUGGER__
         when 'continue'
           @q_msg << 'c'
           send_response req, allThreadsContinued: true
-        # test/protocol/next_raw_dap_test.rb
-        when 'stepIn'
-          begin
-            @session.check_postmortem
-            @q_msg << 's'
-            send_response req
-          rescue PostmortemError
-            send_response req,
-                          success: false, message: 'postmortem mode',
-                          result: "'stepIn' is not supported while postmortem mode"
-          end
         when 'stepOut'
           begin
             @session.check_postmortem
