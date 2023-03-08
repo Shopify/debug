@@ -372,6 +372,15 @@ module DEBUGGER__
         end
       end
 
+      ## boot/configuration
+      # no tests in test/protocol
+      register_command 'launch' do |_args, req|
+        send_response req
+        # `launch` runs on debuggee on the same file system
+        UI_DAP.local_fs_map_set req.dig('arguments', 'localfs') || req.dig('arguments', 'localfsMap') || true
+        @nonstop = true
+      end
+
       ## control
 
       # test/protocol/next_raw_dap_test.rb
@@ -512,13 +521,7 @@ module DEBUGGER__
         # andyw8
         case req['command']
 
-        ## boot/configuration
-        when 'launch'
-          send_response req
-          # `launch` runs on debuggee on the same file system
-          UI_DAP.local_fs_map_set req.dig('arguments', 'localfs') || req.dig('arguments', 'localfsMap') || true
-          @nonstop = true
-
+        when 'nothing'
         ## control
         else
           if respond_to? mid = "request_#{req['command']}"
