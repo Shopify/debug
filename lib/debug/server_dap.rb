@@ -287,6 +287,7 @@ module DEBUGGER__
 
     def process
       # TODO: move out of `process`
+      # test/protocol/disconnect_dap_test.rb
       register_command('disconnect') do |args, req|
         terminate = args.fetch("terminateDebuggee", false)
 
@@ -304,6 +305,20 @@ module DEBUGGER__
             @q_msg << 'kill!'
             pause
           end
+        end
+      end
+
+      ## control
+
+      register_command 'next' do |_args, req|
+        begin
+          @session.check_postmortem
+          @q_msg << 'n'
+          send_response req
+        rescue PostmortemError
+          send_response req,
+                        success: false, message: 'postmortem mode',
+                        result: "'Next' is not supported while postmortem mode"
         end
       end
 
@@ -406,16 +421,7 @@ module DEBUGGER__
         when 'continue'
           @q_msg << 'c'
           send_response req, allThreadsContinued: true
-        when 'next'
-          begin
-            @session.check_postmortem
-            @q_msg << 'n'
-            send_response req
-          rescue PostmortemError
-            send_response req,
-                          success: false, message: 'postmortem mode',
-                          result: "'Next' is not supported while postmortem mode"
-          end
+        # test/protocol/next_raw_dap_test.rb
         when 'stepIn'
           begin
             @session.check_postmortem
