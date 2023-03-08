@@ -412,8 +412,6 @@ module DEBUGGER__
         send_response req, allThreadsContinued: true
       end
 
-      ## control
-
       # test/protocol/next_raw_dap_test.rb
       register_request 'next' do |_args, req|
         begin
