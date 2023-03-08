@@ -288,24 +288,63 @@ module DEBUGGER__
 
     def process
       # TODO: move out of `process`
-      # test/protocol/disconnect_dap_test.rb
-      register_command('disconnect') do |args, req|
-        terminate = args.fetch("terminateDebuggee", false)
 
-        SESSION.clear_all_breakpoints
+      ## boot/configuration
+      # no tests in test/protocol
+      register_command 'launch' do |_args, req|
+        send_response req
+        # `launch` runs on debuggee on the same file system
+        UI_DAP.local_fs_map_set req.dig('arguments', 'localfs') || req.dig('arguments', 'localfsMap') || true
+        @nonstop = true
+      end
+
+      # test/protocol/boot_config_raw_dap_test.rb
+      register_command 'attach' do |_args, req|
+        send_response req
+        UI_DAP.local_fs_map_set req.dig('arguments', 'localfs') || req.dig('arguments', 'localfsMap')
+
+        if req.dig('arguments', 'nonstop') == true
+          @nonstop = true
+        else
+          @nonstop = false
+        end
+      end
+
+      # test/protocol/disconnect_dap_test.rb
+      register_command 'configurationDone' do |_args, req|
         send_response req
 
-        if SESSION.in_subsession?
-          if terminate
-            @q_msg << 'kill!'
-          else
-            @q_msg << 'continue'
-          end
+        if @nonstop
+          @q_msg << 'continue'
         else
-          if terminate
-            @q_msg << 'kill!'
-            pause
+          if SESSION.in_subsession?
+            send_event 'stopped', reason: 'pause',
+                                  threadId: 1, # maybe ...
+                                  allThreadsStopped: true
           end
+        end
+      end
+
+      # test/protocol/break_raw_dap_test.rb
+      register_command 'setBreakpoints' do |args, req|
+        req_path = args.dig('source', 'path')
+        path = UI_DAP.local_to_remote_path(req_path)
+
+        if path
+          SESSION.clear_line_breakpoints path
+
+          bps = []
+          args['breakpoints'].each{|bp|
+            line = bp['line']
+            if cond = bp['condition']
+              bps << SESSION.add_line_breakpoint(path, line, cond: cond)
+            else
+              bps << SESSION.add_line_breakpoint(path, line)
+            end
+          }
+          send_response req, breakpoints: (bps.map do |bp| {verified: true,} end)
+        else
+          send_response req, success: false, message: "#{req_path} is not available"
         end
       end
 
@@ -346,39 +385,31 @@ module DEBUGGER__
       end
 
       # test/protocol/disconnect_dap_test.rb
-      register_command 'configurationDone' do |_args, req|
+      register_command('disconnect') do |args, req|
+        terminate = args.fetch("terminateDebuggee", false)
+
+        SESSION.clear_all_breakpoints
         send_response req
 
-        if @nonstop
-          @q_msg << 'continue'
+        if SESSION.in_subsession?
+          if terminate
+            @q_msg << 'kill!'
+          else
+            @q_msg << 'continue'
+          end
         else
-          if SESSION.in_subsession?
-            send_event 'stopped', reason: 'pause',
-                                  threadId: 1, # maybe ...
-                                  allThreadsStopped: true
+          if terminate
+            @q_msg << 'kill!'
+            pause
           end
         end
       end
 
-      # test/protocol/boot_config_raw_dap_test.rb
-      register_command 'attach' do |_args, req|
-        send_response req
-        UI_DAP.local_fs_map_set req.dig('arguments', 'localfs') || req.dig('arguments', 'localfsMap')
-
-        if req.dig('arguments', 'nonstop') == true
-          @nonstop = true
-        else
-          @nonstop = false
-        end
-      end
-
-      ## boot/configuration
-      # no tests in test/protocol
-      register_command 'launch' do |_args, req|
-        send_response req
-        # `launch` runs on debuggee on the same file system
-        UI_DAP.local_fs_map_set req.dig('arguments', 'localfs') || req.dig('arguments', 'localfsMap') || true
-        @nonstop = true
+      ## control
+      # test/protocol/break_raw_dap_test.rb
+      register_command 'continue' do |_args, req|
+        @q_msg << 'c'
+        send_response req, allThreadsContinued: true
       end
 
       ## control
@@ -394,58 +425,6 @@ module DEBUGGER__
                         success: false, message: 'postmortem mode',
                         result: "'Next' is not supported while postmortem mode"
         end
-      end
-
-      # test/protocol/break_raw_dap_test.rb
-      register_command 'setBreakpoints' do |args, req|
-        req_path = args.dig('source', 'path')
-        path = UI_DAP.local_to_remote_path(req_path)
-
-        if path
-          SESSION.clear_line_breakpoints path
-
-          bps = []
-          args['breakpoints'].each{|bp|
-            line = bp['line']
-            if cond = bp['condition']
-              bps << SESSION.add_line_breakpoint(path, line, cond: cond)
-            else
-              bps << SESSION.add_line_breakpoint(path, line)
-            end
-          }
-          send_response req, breakpoints: (bps.map do |bp| {verified: true,} end)
-        else
-          send_response req, success: false, message: "#{req_path} is not available"
-        end
-      end
-
-      # test/protocol/eval_raw_dap_test.rb
-      # NOTE: contains Shopify workaround
-      register_command 'evaluate' do |_args, req|
-        expr = req.dig('arguments', 'expression')
-        if /\A\s*,(.+)\z/ =~ expr
-          dbg_expr = $1
-          send_response req,
-                        result: "",
-                        variablesReference: 0
-          # Workaround for https://github.com/ruby/debug/issues/900
-          # See https://github.com/Shopify/debug/pull/4 for more details
-          commands = [dbg_expr.split(';;').join("\n")]
-          ::DEBUGGER__::SESSION.add_preset_commands '#debugger', commands, kick: false, continue: false
-        else
-          @q_msg << req
-        end
-      end
-
-      register_command 'terminate' do |_args, req|
-        send_response req
-        exit
-      end
-
-      # test/protocol/break_raw_dap_test.rb
-      register_command 'continue' do |_args, req|
-        @q_msg << 'c'
-        send_response req, allThreadsContinued: true
       end
 
       # test/protocol/step_raw_dap_test.rb
@@ -474,26 +453,15 @@ module DEBUGGER__
         end
       end
 
-      # test/protocol/step_back_raw_dap_test.rb
-      register_command 'stepBack' do |_args, req|
-        @q_msg << req
+      register_command 'terminate' do |_args, req|
+        send_response req
+        exit
       end
 
-      # test/protocol/threads_test.rb
-      register_command 'threads' do |_args, req|
-        send_response req, threads: SESSION.managed_thread_clients.map{|tc|
-          { id: tc.id,
-            name: tc.name,
-          }
-        }
-      end
-
-      register_command 'stackTrace',
-                       'scopes',
-                       'variables',
-                       'source',
-                       'completions' do |_args, req|
-        @q_msg << req
+      # test/protocol/disconnect_dap_test.rb
+      register_command 'pause' do |_args, req|
+        send_response req
+        Process.kill(UI_ServerBase::TRAP_SIGNAL, Process.pid)
       end
 
       # there are no tests for this
@@ -503,10 +471,45 @@ module DEBUGGER__
                       result: "Reverse Continue is not supported. Only \"Step back\" is supported."
       end
 
-      # test/protocol/disconnect_dap_test.rb
-      register_command 'pause' do |_args, req|
-        send_response req
-        Process.kill(UI_ServerBase::TRAP_SIGNAL, Process.pid)
+      # test/protocol/step_back_raw_dap_test.rb
+      register_command 'stepBack' do |_args, req|
+        @q_msg << req
+      end
+
+      ## query
+      # test/protocol/threads_test.rb
+      register_command 'threads' do |_args, req|
+        send_response req, threads: SESSION.managed_thread_clients.map{|tc|
+          { id: tc.id,
+            name: tc.name,
+          }
+        }
+      end
+
+      # test/protocol/eval_raw_dap_test.rb
+      # NOTE: contains Shopify workaround
+      register_command 'evaluate' do |_args, req|
+        expr = req.dig('arguments', 'expression')
+        if /\A\s*,(.+)\z/ =~ expr
+          dbg_expr = $1
+          send_response req,
+                        result: "",
+                        variablesReference: 0
+          # Workaround for https://github.com/ruby/debug/issues/900
+          # See https://github.com/Shopify/debug/pull/4 for more details
+          commands = [dbg_expr.split(';;').join("\n")]
+          ::DEBUGGER__::SESSION.add_preset_commands '#debugger', commands, kick: false, continue: false
+        else
+          @q_msg << req
+        end
+      end
+
+      register_command 'stackTrace',
+                       'scopes',
+                       'variables',
+                       'source',
+                       'completions' do |_args, req|
+        @q_msg << req
       end
 
       while req = recv_request
