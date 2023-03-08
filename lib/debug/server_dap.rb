@@ -412,6 +412,14 @@ module DEBUGGER__
         @q_msg << req
       end
 
+      # there are no tests for this
+      register_command 'reverseContinue' do |_args, req|
+        send_response req,
+                      success: false, message: 'cancelled',
+                      result: "Reverse Continue is not supported. Only \"Step back\" is supported."
+      end
+
+
       while req = recv_request
         raise "not a request: #{req.inspect}" unless req['type'] == 'request'
         args = req.dig('arguments')
@@ -497,11 +505,6 @@ module DEBUGGER__
         when 'pause'
           send_response req
           Process.kill(UI_ServerBase::TRAP_SIGNAL, Process.pid)
-        when 'reverseContinue'
-          send_response req,
-                        success: false, message: 'cancelled',
-                        result: "Reverse Continue is not supported. Only \"Step back\" is supported."
-
         else
           if respond_to? mid = "request_#{req['command']}"
             send mid, req
