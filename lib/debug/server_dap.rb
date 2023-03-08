@@ -348,6 +348,7 @@ module DEBUGGER__
       end
 
       # test/protocol/eval_raw_dap_test.rb
+      # NOTE: contains Shopify workaround
       register_command 'evaluate' do |_args, req|
         expr = req.dig('arguments', 'expression')
         if /\A\s*,(.+)\z/ =~ expr
