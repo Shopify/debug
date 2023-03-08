@@ -360,6 +360,18 @@ module DEBUGGER__
         end
       end
 
+      # test/protocol/boot_config_raw_dap_test.rb
+      register_command 'attach' do |_args, req|
+        send_response req
+        UI_DAP.local_fs_map_set req.dig('arguments', 'localfs') || req.dig('arguments', 'localfsMap')
+
+        if req.dig('arguments', 'nonstop') == true
+          @nonstop = true
+        else
+          @nonstop = false
+        end
+      end
+
       ## control
 
       # test/protocol/next_raw_dap_test.rb
@@ -506,16 +518,6 @@ module DEBUGGER__
           # `launch` runs on debuggee on the same file system
           UI_DAP.local_fs_map_set req.dig('arguments', 'localfs') || req.dig('arguments', 'localfsMap') || true
           @nonstop = true
-
-        when 'attach'
-          send_response req
-          UI_DAP.local_fs_map_set req.dig('arguments', 'localfs') || req.dig('arguments', 'localfsMap')
-
-          if req.dig('arguments', 'nonstop') == true
-            @nonstop = true
-          else
-            @nonstop = false
-          end
 
         ## control
         else
