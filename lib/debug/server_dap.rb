@@ -347,6 +347,24 @@ module DEBUGGER__
         end
       end
 
+      # test/protocol/eval_raw_dap_test.rb
+      register_command 'evaluate' do |_args, req|
+        expr = req.dig('arguments', 'expression')
+        if /\A\s*,(.+)\z/ =~ expr
+          dbg_expr = $1
+          send_response req,
+                        result: "",
+                        variablesReference: 0
+          # Workaround for https://github.com/ruby/debug/issues/900
+          # See https://github.com/Shopify/debug/pull/4 for more details
+          commands = [dbg_expr.split(';;').join("\n")]
+          ::DEBUGGER__::SESSION.add_preset_commands '#debugger', commands, kick: false, continue: false
+        else
+          @q_msg << req
+        end
+      end
+
+
       while req = recv_request
         raise "not a request: #{req.inspect}" unless req['type'] == 'request'
         args = req.dig('arguments')
@@ -467,21 +485,6 @@ module DEBUGGER__
               name: tc.name,
             }
           }
-
-        when 'evaluate'
-          expr = req.dig('arguments', 'expression')
-          if /\A\s*,(.+)\z/ =~ expr
-            dbg_expr = $1
-            send_response req,
-                          result: "",
-                          variablesReference: 0
-            # Workaround for https://github.com/ruby/debug/issues/900
-            # See https://github.com/Shopify/debug/pull/4 for more details
-            commands = [dbg_expr.split(';;').join("\n")]
-            ::DEBUGGER__::SESSION.add_preset_commands '#debugger', commands, kick: false, continue: false
-          else
-            @q_msg << req
-          end
         when 'stackTrace',
              'scopes',
              'variables',
