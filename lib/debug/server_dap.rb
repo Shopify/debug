@@ -370,6 +370,11 @@ module DEBUGGER__
         exit
       end
 
+      register_command 'continue' do |_args, req|
+        @q_msg << 'c'
+        send_response req, allThreadsContinued: true
+      end
+
       # test/protocol/step_raw_dap_test.rb
       register_command 'stepIn' do |_args, req|
         begin
@@ -507,9 +512,6 @@ module DEBUGGER__
           send_response req, breakpoints: filters
 
         ## control
-        when 'continue'
-          @q_msg << 'c'
-          send_response req, allThreadsContinued: true
         else
           if respond_to? mid = "request_#{req['command']}"
             send mid, req
