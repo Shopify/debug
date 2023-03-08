@@ -311,6 +311,7 @@ module DEBUGGER__
 
       ## control
 
+      # test/protocol/next_raw_dap_test.rb
       register_command 'next' do |_args, req|
         begin
           @session.check_postmortem
@@ -320,6 +321,29 @@ module DEBUGGER__
           send_response req,
                         success: false, message: 'postmortem mode',
                         result: "'Next' is not supported while postmortem mode"
+        end
+      end
+
+      # test/protocol/break_raw_dap_test.rb
+      register_command 'setBreakpoints' do |args, req|
+        req_path = args.dig('source', 'path')
+        path = UI_DAP.local_to_remote_path(req_path)
+
+        if path
+          SESSION.clear_line_breakpoints path
+
+          bps = []
+          args['breakpoints'].each{|bp|
+            line = bp['line']
+            if cond = bp['condition']
+              bps << SESSION.add_line_breakpoint(path, line, cond: cond)
+            else
+              bps << SESSION.add_line_breakpoint(path, line)
+            end
+          }
+          send_response req, breakpoints: (bps.map do |bp| {verified: true,} end)
+        else
+          send_response req, success: false, message: "#{req_path} is not available"
         end
       end
 
@@ -365,26 +389,6 @@ module DEBUGGER__
             end
           end
 
-        when 'setBreakpoints'
-          req_path = args.dig('source', 'path')
-          path = UI_DAP.local_to_remote_path(req_path)
-
-          if path
-            SESSION.clear_line_breakpoints path
-
-            bps = []
-            args['breakpoints'].each{|bp|
-              line = bp['line']
-              if cond = bp['condition']
-                bps << SESSION.add_line_breakpoint(path, line, cond: cond)
-              else
-                bps << SESSION.add_line_breakpoint(path, line)
-              end
-            }
-            send_response req, breakpoints: (bps.map do |bp| {verified: true,} end)
-          else
-            send_response req, success: false, message: "#{req_path} is not available"
-          end
 
         when 'setFunctionBreakpoints'
           send_response req
