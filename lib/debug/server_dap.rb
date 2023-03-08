@@ -314,6 +314,52 @@ module DEBUGGER__
         send_response req
       end
 
+      # test/protocol/catch_raw_dap_test.rb
+      register_command 'setExceptionBreakpoints' do |args, req|
+        process_filter = ->(filter_id, cond = nil) {
+          bp =
+            case filter_id
+            when 'any'
+              SESSION.add_catch_breakpoint 'Exception', cond: cond
+            when 'RuntimeError'
+              SESSION.add_catch_breakpoint 'RuntimeError', cond: cond
+            else
+              nil
+            end
+            {
+              verified: !bp.nil?,
+              message: bp.inspect,
+            }
+          }
+
+          SESSION.clear_catch_breakpoints 'Exception', 'RuntimeError'
+
+          filters = args.fetch('filters').map {|filter_id|
+            process_filter.call(filter_id)
+          }
+
+          filters += args.fetch('filterOptions', {}).map{|bp_info|
+          process_filter.call(bp_info['filterId'], bp_info['condition'])
+        }
+
+        send_response req, breakpoints: filters
+      end
+
+      # test/protocol/disconnect_dap_test.rb
+      register_command 'configurationDone' do |_args, req|
+        send_response req
+
+        if @nonstop
+          @q_msg << 'continue'
+        else
+          if SESSION.in_subsession?
+            send_event 'stopped', reason: 'pause',
+                                  threadId: 1, # maybe ...
+                                  allThreadsStopped: true
+          end
+        end
+      end
+
       ## control
 
       # test/protocol/next_raw_dap_test.rb
@@ -470,48 +516,6 @@ module DEBUGGER__
           else
             @nonstop = false
           end
-
-        when 'configurationDone'
-          send_response req
-
-          if @nonstop
-            @q_msg << 'continue'
-          else
-            if SESSION.in_subsession?
-              send_event 'stopped', reason: 'pause',
-                                    threadId: 1, # maybe ...
-                                    allThreadsStopped: true
-            end
-          end
-
-        when 'setExceptionBreakpoints'
-          process_filter = ->(filter_id, cond = nil) {
-            bp =
-              case filter_id
-              when 'any'
-                SESSION.add_catch_breakpoint 'Exception', cond: cond
-              when 'RuntimeError'
-                SESSION.add_catch_breakpoint 'RuntimeError', cond: cond
-              else
-                nil
-              end
-              {
-                verified: !bp.nil?,
-                message: bp.inspect,
-              }
-            }
-
-            SESSION.clear_catch_breakpoints 'Exception', 'RuntimeError'
-
-            filters = args.fetch('filters').map {|filter_id|
-              process_filter.call(filter_id)
-            }
-
-            filters += args.fetch('filterOptions', {}).map{|bp_info|
-            process_filter.call(bp_info['filterId'], bp_info['condition'])
-          }
-
-          send_response req, breakpoints: filters
 
         ## control
         else
