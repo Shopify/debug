@@ -9,8 +9,8 @@ require_relative 'cdp_utils'
 
 module DEBUGGER__
   class ProtocolTestCase < TestCase
-    include DAP_TestUtils
-    include CDP_TestUtils
+    include DAP_RawTestUtils
+    include CDP_RawTestUtils
 
     class Detach < StandardError
     end

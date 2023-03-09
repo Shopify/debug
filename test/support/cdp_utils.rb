@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module DEBUGGER__
-  module CDP_TestUtils
+  module CDP_RawTestUtils
 
     class Detach < StandardError
     end

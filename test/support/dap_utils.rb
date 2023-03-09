@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module DEBUGGER__
-  module DAP_TestUtils
+  module DAP_RawTestUtils
     class RetryBecauseCantRead < Exception
     end
 
