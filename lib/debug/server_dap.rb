@@ -278,16 +278,13 @@ module DEBUGGER__
     end
 
     @@registered_requests = {}
-    private def register_request *names, &b
+    def self.register_request *names, &b
       cmd = RequestHandler.new(b)
 
       names.each{|name|
         @@registered_requests[name] = cmd
       }
     end
-
-    def process
-      # TODO: move out of `process`
 
       ## boot/configuration
       # no tests in test/protocol
@@ -510,12 +507,13 @@ module DEBUGGER__
         @q_msg << req
       end
 
+    def process
       while req = recv_request
         raise "not a request: #{req.inspect}" unless req['type'] == 'request'
         args = req.dig('arguments')
 
         if (cmd = @@registered_requests[req['command']])
-          cmd.block.call(args, req)
+          self.instance_exec(args, req, &cmd.block)
         else
           if respond_to? mid = "request_#{req['command']}"
             send mid, req
