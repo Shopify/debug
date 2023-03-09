@@ -288,7 +288,7 @@ module DEBUGGER__
 
       ## boot/configuration
       # no tests in test/protocol
-      register_request 'launch' do |_args, req|
+      register_request 'launch' do |req, _args|
         send_response req
         # `launch` runs on debuggee on the same file system
         UI_DAP.local_fs_map_set req.dig('arguments', 'localfs') || req.dig('arguments', 'localfsMap') || true
@@ -296,7 +296,7 @@ module DEBUGGER__
       end
 
       # test/protocol/boot_config_raw_dap_test.rb
-      register_request 'attach' do |_args, req|
+      register_request 'attach' do |req, _args|
         send_response req
         UI_DAP.local_fs_map_set req.dig('arguments', 'localfs') || req.dig('arguments', 'localfsMap')
 
@@ -308,7 +308,7 @@ module DEBUGGER__
       end
 
       # test/protocol/disconnect_dap_test.rb
-      register_request 'configurationDone' do |_args, req|
+      register_request 'configurationDone' do |req, _args|
         send_response req
 
         if @nonstop
@@ -323,7 +323,7 @@ module DEBUGGER__
       end
 
       # test/protocol/break_raw_dap_test.rb
-      register_request 'setBreakpoints' do |args, req|
+      register_request 'setBreakpoints' do |req, args|
         req_path = args.dig('source', 'path')
         path = UI_DAP.local_to_remote_path(req_path)
 
@@ -346,12 +346,12 @@ module DEBUGGER__
       end
 
       # test/protocol/boot_config_raw_dap_test.rb
-      register_request 'setFunctionBreakpoints' do |_args, req|
+      register_request 'setFunctionBreakpoints' do |req, _args|
         send_response req
       end
 
       # test/protocol/catch_raw_dap_test.rb
-      register_request 'setExceptionBreakpoints' do |args, req|
+      register_request 'setExceptionBreakpoints' do |req, args|
         process_filter = ->(filter_id, cond = nil) {
           bp =
             case filter_id
@@ -382,7 +382,7 @@ module DEBUGGER__
       end
 
       # test/protocol/disconnect_dap_test.rb
-      register_request('disconnect') do |args, req|
+      register_request('disconnect') do |req, args|
         terminate = args.fetch("terminateDebuggee", false)
 
         SESSION.clear_all_breakpoints
@@ -404,13 +404,13 @@ module DEBUGGER__
 
       ## control
       # test/protocol/break_raw_dap_test.rb
-      register_request 'continue' do |_args, req|
+      register_request 'continue' do |req, _args|
         @q_msg << 'c'
         send_response req, allThreadsContinued: true
       end
 
       # test/protocol/next_raw_dap_test.rb
-      register_request 'next' do |_args, req|
+      register_request 'next' do |req, _args|
         begin
           @session.check_postmortem
           @q_msg << 'n'
@@ -423,7 +423,7 @@ module DEBUGGER__
       end
 
       # test/protocol/step_raw_dap_test.rb
-      register_request 'stepIn' do |_args, req|
+      register_request 'stepIn' do |req, _args|
         begin
           @session.check_postmortem
           @q_msg << 's'
@@ -436,7 +436,7 @@ module DEBUGGER__
       end
 
       # test/protocol/finish_raw_dap_test.rb
-      register_request 'stepOut' do |_args, req|
+      register_request 'stepOut' do |req, _args|
         begin
           @session.check_postmortem
           @q_msg << 'fin'
@@ -448,32 +448,32 @@ module DEBUGGER__
         end
       end
 
-      register_request 'terminate' do |_args, req|
+      register_request 'terminate' do |req, _args|
         send_response req
         exit
       end
 
       # test/protocol/disconnect_dap_test.rb
-      register_request 'pause' do |_args, req|
+      register_request 'pause' do |req, _args|
         send_response req
         Process.kill(UI_ServerBase::TRAP_SIGNAL, Process.pid)
       end
 
       # there are no tests for this
-      register_request 'reverseContinue' do |_args, req|
+      register_request 'reverseContinue' do |req, _args|
         send_response req,
                       success: false, message: 'cancelled',
                       result: "Reverse Continue is not supported. Only \"Step back\" is supported."
       end
 
       # test/protocol/step_back_raw_dap_test.rb
-      register_request 'stepBack' do |_args, req|
+      register_request 'stepBack' do |req, _args|
         @q_msg << req
       end
 
       ## query
       # test/protocol/threads_test.rb
-      register_request 'threads' do |_args, req|
+      register_request 'threads' do |req, _args|
         send_response req, threads: SESSION.managed_thread_clients.map{|tc|
           { id: tc.id,
             name: tc.name,
@@ -483,7 +483,7 @@ module DEBUGGER__
 
       # test/protocol/eval_raw_dap_test.rb
       # NOTE: contains Shopify workaround
-      register_request 'evaluate' do |_args, req|
+      register_request 'evaluate' do |req, _args|
         expr = req.dig('arguments', 'expression')
         if /\A\s*,(.+)\z/ =~ expr
           dbg_expr = $1
@@ -503,7 +503,7 @@ module DEBUGGER__
                        'scopes',
                        'variables',
                        'source',
-                       'completions' do |_args, req|
+                       'completions' do |req, _args|
         @q_msg << req
       end
 
@@ -513,7 +513,7 @@ module DEBUGGER__
         args = req.dig('arguments')
 
         if (cmd = @@registered_requests[req['command']])
-          self.instance_exec(args, req, &cmd.block)
+          self.instance_exec(req, args, &cmd.block)
         else
           if respond_to? mid = "request_#{req['command']}"
             send mid, req
