@@ -98,7 +98,6 @@ module DEBUGGER__
             candidates = ['C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe', 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe']
             path = get_chrome_path candidates
           end
-          uuid = SecureRandom.uuid
           # The path is based on https://github.com/sindresorhus/open/blob/v8.4.0/index.js#L128.
           stdin, stdout, stderr, wait_thr = *Open3.popen3("#{ENV['SystemRoot']}\\System32\\WindowsPowerShell\\v1.0\\powershell")
           tf = Tempfile.create(['debug-', '.txt'])
@@ -450,11 +449,7 @@ module DEBUGGER__
     end
 
     def send_response req, **res
-      if res.empty?
-        @ws_server.send id: req['id'], result: {}
-      else
-        @ws_server.send id: req['id'], result: res
-      end
+      @ws_server.send id: req['id'], result: res
     end
 
     def send_fail_response req, **res
@@ -462,11 +457,7 @@ module DEBUGGER__
     end
 
     def send_event method, **params
-      if params.empty?
-        @ws_server.send method: method, params: {}
-      else
-        @ws_server.send method: method, params: params
-      end
+      @ws_server.send method: method, params: params
     end
 
     INVALID_REQUEST = -32600
@@ -557,6 +548,9 @@ module DEBUGGER__
             activate_bp bps
           end
           send_response req
+        when 'Debugger.pause'
+          send_response req
+          Process.kill(UI_ServerBase::TRAP_SIGNAL, Process.pid)
 
         # breakpoint
         when 'Debugger.getPossibleBreakpoints'
@@ -564,35 +558,31 @@ module DEBUGGER__
         when 'Debugger.setBreakpointByUrl'
           line = req.dig('params', 'lineNumber')
           if regexp = req.dig('params', 'urlRegex')
-            path = regexp.match(/(.*)\|/)[1].gsub("\\", "")
-            cond = req.dig('params', 'condition')
-            src = get_source_code path
-            end_line = src.lines.count
-            line = end_line  if line > end_line
             b_id = "1:#{line}:#{regexp}"
-            if cond != ''
-              SESSION.add_line_breakpoint(path, line + 1, cond: cond)
-            else
-              SESSION.add_line_breakpoint(path, line + 1)
-            end
             bps[b_id] = bps.size
-            # Because we need to return scriptId, responses are returned in SESSION thread.
-            req['params']['scriptId'] = path
-            req['params']['lineNumber'] = line
-            req['params']['breakpointId'] = b_id
-            @q_msg << req
+            path = regexp.match(/(.*)\|/)[1].gsub("\\", "")
+            add_line_breakpoint(req, b_id, path)
           elsif url = req.dig('params', 'url')
             b_id = "#{line}:#{url}"
-            send_response req,
-                          breakpointId: b_id,
-                          locations: []
-          elsif hash = req.dig('params', 'scriptHash')
-            b_id = "#{line}:#{hash}"
-            send_response req,
-                          breakpointId: b_id,
-                          locations: []
+            # When breakpoints are set in Script snippet, non-existent path such as "snippet:///Script%20snippet%20%231" sent.
+            # That's why we need to check it here.
+            if File.exist? url
+              bps[b_id] = bps.size
+              add_line_breakpoint(req, b_id, url)
+            else
+              send_response req,
+                            breakpointId: b_id,
+                            locations: []
+            end            
           else
-            raise 'Unsupported'
+            if hash = req.dig('params', 'scriptHash')
+              b_id = "#{line}:#{hash}"
+              send_response req,
+                            breakpointId: b_id,
+                            locations: []
+            else
+              raise 'Unsupported'
+            end
           end
         when 'Debugger.removeBreakpoint'
           b_id = req.dig('params', 'breakpointId')
@@ -629,6 +619,24 @@ module DEBUGGER__
       end
     rescue Detach
       @q_msg << 'continue'
+    end
+
+    def add_line_breakpoint req, b_id, path
+      cond = req.dig('params', 'condition')
+      line = req.dig('params', 'lineNumber')
+      src = get_source_code path
+      end_line = src.lines.count
+      line = end_line  if line > end_line
+      if cond != ''
+        SESSION.add_line_breakpoint(path, line + 1, cond: cond)
+      else
+        SESSION.add_line_breakpoint(path, line + 1)
+      end
+      # Because we need to return scriptId, responses are returned in SESSION thread.
+      req['params']['scriptId'] = path
+      req['params']['lineNumber'] = line
+      req['params']['breakpointId'] = b_id
+      @q_msg << req
     end
 
     def del_bp bps, k
@@ -668,31 +676,20 @@ module DEBUGGER__
     def cleanup_reader
       super
       Process.kill :KILL, @chrome_pid if @chrome_pid
+    rescue Errno::ESRCH # continue if @chrome_pid process is not found
     end
 
     ## Called by the SESSION thread
 
-    def respond req, **result
-      send_response req, **result
-    end
-
-    def respond_fail req, **result
-      send_fail_response req, **result
-    end
-
-    def fire_event event, **result
-      if result.empty?
-        send_event event
-      else
-        send_event event, **result
-      end
-    end
+    alias respond send_response
+    alias respond_fail send_fail_response
+    alias fire_event send_event
 
     def sock skip: false
       yield $stderr
     end
 
-    def puts result
+    def puts result=''
       # STDERR.puts "puts: #{result}"
       # send_event 'output', category: 'stderr', output: "PUTS!!: " + result.to_s
     end
@@ -756,7 +753,11 @@ module DEBUGGER__
             request_tc [:cdp, :scope, req, fid]
           when 'global'
             vars = safe_global_variables.sort.map do |name|
-              gv = eval(name.to_s)
+              begin
+                gv = eval(name.to_s)
+              rescue Errno::ENOENT
+                gv = nil
+              end
               prop = {
                 name: name,
                 value: {
@@ -836,7 +837,7 @@ module DEBUGGER__
       end
     end
 
-    def cdp_event args
+    def process_protocol_result args
       type, req, result = args
 
       case type
@@ -1026,7 +1027,7 @@ module DEBUGGER__
           result[:data] = evaluate_result exception
           result[:reason] = 'exception'
         end
-        event! :cdp_result, :backtrace, req, result
+        event! :protocol_result, :backtrace, req, result
       when :evaluate
         res = {}
         fid, expr, group = args
@@ -1071,7 +1072,7 @@ module DEBUGGER__
             begin
               orig_stdout = $stdout
               $stdout = StringIO.new
-              result = current_frame.binding.eval(expr.to_s, '(DEBUG CONSOLE)')
+              result = b.eval(expr.to_s, '(DEBUG CONSOLE)')
             rescue Exception => e
               result = e
               res[:exceptionDetails] = exceptionDetails(e, 'Uncaught')
@@ -1087,7 +1088,7 @@ module DEBUGGER__
         end
 
         res[:result] = evaluate_result(result)
-        event! :cdp_result, :evaluate, req, message: message, response: res, output: output
+        event! :protocol_result, :evaluate, req, message: message, response: res, output: output
       when :scope
         fid = args.shift
         frame = @target_frames[fid]
@@ -1110,7 +1111,7 @@ module DEBUGGER__
             vars.unshift variable(name, val)
           end
         end
-        event! :cdp_result, :scope, req, vars
+        event! :protocol_result, :scope, req, vars
       when :properties
         oid = args.shift
         result = []
@@ -1152,14 +1153,14 @@ module DEBUGGER__
           }
           prop += [internalProperty('#class', M_CLASS.bind_call(obj))]
         end
-        event! :cdp_result, :properties, req, result: result, internalProperties: prop
+        event! :protocol_result, :properties, req, result: result, internalProperties: prop
       when :exception
         oid = args.shift
         exc = nil
         if obj = @obj_map[oid]
           exc = exceptionDetails obj, obj.to_s
         end
-        event! :cdp_result, :exception, req, exceptionDetails: exc
+        event! :protocol_result, :exception, req, exceptionDetails: exc
       end
     end
 

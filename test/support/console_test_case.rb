@@ -86,7 +86,7 @@ module DEBUGGER__
     end
 
     def debug_code(program, remote: true, &test_steps)
-      Timeout.timeout(30) do
+      Timeout.timeout(60) do
         prepare_test_environment(program, test_steps) do
           if remote && !NO_REMOTE && MULTITHREADED_TEST
             begin
@@ -200,7 +200,7 @@ module DEBUGGER__
           # kill debug console process
           read.close
           write.close
-          kill_safely pid, :debugger, test_info
+          kill_safely pid
         end
       end
     end

@@ -125,6 +125,7 @@ module DEBUGGER__
     def dap_setup bytes
       CONFIG.set_config no_color: true
       @seq = 0
+      @send_lock = Mutex.new
 
       case self
       when UI_UnixDomainServer
@@ -212,9 +213,13 @@ module DEBUGGER__
       if sock = @sock
         kw[:seq] = @seq += 1
         str = JSON.dump(kw)
-        sock.write "Content-Length: #{str.bytesize}\r\n\r\n#{str}"
+        @send_lock.synchronize do
+          sock.write "Content-Length: #{str.bytesize}\r\n\r\n#{str}"
+        end
         show_protocol '<', str
       end
+    rescue Errno::EPIPE => e
+      $stderr.puts "#{e.inspect} rescued during sending message"
     end
 
     def send_response req, success: true, message: nil, **kw
@@ -246,17 +251,17 @@ module DEBUGGER__
     end
 
     def recv_request
-      r = IO.select([@sock])
+      IO.select([@sock])
 
       @session.process_group.sync do
         raise RetryBecauseCantRead unless IO.select([@sock], nil, nil, 0)
 
-        case header = @sock.gets
+        case @sock.gets
         when /Content-Length: (\d+)/
           b = @sock.read(2)
           raise b.inspect unless b == "\r\n"
 
-          l = @sock.read(s = $1.to_i)
+          l = @sock.read($1.to_i)
           show_protocol :>, l
           JSON.load(l)
         when nil
@@ -309,7 +314,6 @@ module DEBUGGER__
         when 'setBreakpoints'
           req_path = args.dig('source', 'path')
           path = UI_DAP.local_to_remote_path(req_path)
-
           if path
             SESSION.clear_line_breakpoints path
 
@@ -436,11 +440,12 @@ module DEBUGGER__
         when 'evaluate'
           expr = req.dig('arguments', 'expression')
           if /\A\s*,(.+)\z/ =~ expr
-            dbg_expr = $1
+            dbg_expr = $1.strip
+            dbg_expr.split(';;') { |cmd| @q_msg << cmd }
+
             send_response req,
-                          result: "",
+                          result: "(rdbg:command) #{dbg_expr}",
                           variablesReference: 0
-            debugger do: dbg_expr
           else
             @q_msg << req
           end
@@ -452,8 +457,8 @@ module DEBUGGER__
           @q_msg << req
 
         else
-          if respond_to? mid = "request_#{req['command']}"
-            send mid, req
+          if respond_to? mid = "custom_dap_request_#{req['command']}"
+            __send__ mid, req
           else
             raise "Unknown request: #{req.inspect}"
           end
@@ -546,7 +551,7 @@ module DEBUGGER__
       when 'stackTrace'
         tid = req.dig('arguments', 'threadId')
 
-        if tc = find_waiting_tc(tid)
+        if find_waiting_tc(tid)
           request_tc [:dap, :backtrace, req]
         else
           fail_response req
@@ -555,7 +560,7 @@ module DEBUGGER__
         frame_id = req.dig('arguments', 'frameId')
         if @frame_map[frame_id]
           tid, fid = @frame_map[frame_id]
-          if tc = find_waiting_tc(tid)
+          if find_waiting_tc(tid)
             request_tc [:dap, :scopes, req, fid]
           else
             fail_response req
@@ -591,7 +596,7 @@ module DEBUGGER__
             frame_id = ref[1]
             tid, fid = @frame_map[frame_id]
 
-            if tc = find_waiting_tc(tid)
+            if find_waiting_tc(tid)
               request_tc [:dap, :scope, req, fid]
             else
               fail_response req
@@ -600,7 +605,7 @@ module DEBUGGER__
           when :variable
             tid, vid = ref[1], ref[2]
 
-            if tc = find_waiting_tc(tid)
+            if find_waiting_tc(tid)
               request_tc [:dap, :variable, req, vid]
             else
               fail_response req
@@ -619,7 +624,7 @@ module DEBUGGER__
           tid, fid = @frame_map[frame_id]
           expr = req.dig('arguments', 'expression')
 
-          if tc = find_waiting_tc(tid)
+          if find_waiting_tc(tid)
             request_tc [:dap, :evaluate, req, fid, expr, context]
           else
             fail_response req
@@ -640,7 +645,7 @@ module DEBUGGER__
         frame_id = req.dig('arguments', 'frameId')
         tid, fid = @frame_map[frame_id]
 
-        if tc = find_waiting_tc(tid)
+        if find_waiting_tc(tid)
           text = req.dig('arguments', 'text')
           line = req.dig('arguments', 'line')
           if col  = req.dig('arguments', 'column')
@@ -651,11 +656,15 @@ module DEBUGGER__
           fail_response req
         end
       else
-        raise "Unknown DAP request: #{req.inspect}"
+        if respond_to? mid = "custom_dap_request_#{req['command']}"
+          __send__ mid, req
+        else
+          raise "Unknown request: #{req.inspect}"
+        end
       end
     end
 
-    def dap_event args
+    def process_protocol_result args
       # puts({dap_event: args}.inspect)
       type, req, result = args
 
@@ -703,7 +712,11 @@ module DEBUGGER__
       when :completions
         @ui.respond req, result
       else
-        raise "unsupported: #{args.inspect}"
+        if respond_to? mid = "custom_dap_request_event_#{type}"
+          __send__ mid, req, result
+        else
+          raise "unsupported: #{args.inspect}"
+        end
       end
     end
 
@@ -789,7 +802,7 @@ module DEBUGGER__
           }
         end
 
-        event! :dap_result, :backtrace, req, {
+        event! :protocol_result, :backtrace, req, {
           stackFrames: frames,
           totalFrames: @target_frames.size,
         }
@@ -806,7 +819,7 @@ module DEBUGGER__
             0
           end
 
-        event! :dap_result, :scopes, req, scopes: [{
+        event! :protocol_result, :scopes, req, scopes: [{
           name: 'Local variables',
           presentationHint: 'locals',
           # variablesReference: N, # filled by SESSION
@@ -828,7 +841,7 @@ module DEBUGGER__
           variable(var, val)
         end
 
-        event! :dap_result, :scope, req, variables: vars, tid: self.id
+        event! :protocol_result, :scope, req, variables: vars, tid: self.id
       when :variable
         vid = args.shift
         obj = @var_map[vid]
@@ -876,7 +889,7 @@ module DEBUGGER__
             end
           end
         end
-        event! :dap_result, :variable, req, variables: (vars || []), tid: self.id
+        event! :protocol_result, :variable, req, variables: (vars || []), tid: self.id
 
       when :evaluate
         fid, expr, context = args
@@ -931,7 +944,7 @@ module DEBUGGER__
           result = 'Error: Can not evaluate on this frame'
         end
 
-        event! :dap_result, :evaluate, req, message: message, tid: self.id, **evaluate_result(result)
+        event! :protocol_result, :evaluate, req, message: message, tid: self.id, **evaluate_result(result)
 
       when :completions
         fid, text = args
@@ -941,7 +954,7 @@ module DEBUGGER__
           words = IRB::InputCompletor::retrieve_completion_data(word, bind: b).compact
         end
 
-        event! :dap_result, :completions, req, targets: (words || []).map{|phrase|
+        event! :protocol_result, :completions, req, targets: (words || []).map{|phrase|
           detail = nil
 
           if /\b([_a-zA-Z]\w*[!\?]?)\z/ =~ phrase
@@ -964,7 +977,11 @@ module DEBUGGER__
         }
 
       else
-        raise "Unknown req: #{args.inspect}"
+        if respond_to? mid = "custom_dap_request_#{type}"
+          __send__ mid, req
+        else
+          raise "Unknown request: #{args.inspect}"
+        end
       end
     end
 

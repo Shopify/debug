@@ -157,7 +157,7 @@ module DEBUGGER__
     def create_scenario_and_program
       <<-TEST.chomp
 
-  class #{@class}#{@current_time} < TestCase
+  class #{@class}#{@current_time} < ConsoleTestCase
     def program
       <<~RUBY
         #{format_program}
@@ -477,7 +477,7 @@ module DEBUGGER__
           when /\[\>\]\s(.*)/
             begin
               req = JSON.parse $1
-            rescue JSON::ParserError => e
+            rescue JSON::ParserError
               $stderr.print data
               next
             end
@@ -504,7 +504,7 @@ module DEBUGGER__
           when /\[\<\]\s(.*)/
             begin
               res = JSON.parse $1
-            rescue JSON::ParserError => e
+            rescue JSON::ParserError
               $stderr.print data
               next
             end
