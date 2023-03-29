@@ -440,10 +440,7 @@ module DEBUGGER__
             send_response req,
                           result: "",
                           variablesReference: 0
-            # Workaround for https://github.com/ruby/debug/issues/900
-            # See https://github.com/Shopify/debug/pull/4 for more details
-            commands = [dbg_expr.split(';;').join("\n")]
-            ::DEBUGGER__::SESSION.add_preset_commands '#debugger', commands, kick: false, continue: false
+            debugger do: dbg_expr
           else
             @q_msg << req
           end
