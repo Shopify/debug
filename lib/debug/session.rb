@@ -128,16 +128,16 @@ module DEBUGGER__
       @obj_map = {} # { object_id => ... } for CDP
 
       @tp_thread_begin = nil
+      @tp_thread_end = nil
+
       @commands = {}
       @unsafe_context = false
 
-      has_keep_script_lines = RubyVM.respond_to? :keep_script_lines
+      @has_keep_script_lines = RubyVM.respond_to? :keep_script_lines
 
       @tp_load_script = TracePoint.new(:script_compiled){|tp|
-        if !has_keep_script_lines || bps_pending_until_load?
-          eval_script = tp.eval_script unless has_keep_script_lines
-          ThreadClient.current.on_load tp.instruction_sequence, eval_script
-        end
+        eval_script = tp.eval_script unless @has_keep_script_lines
+        ThreadClient.current.on_load tp.instruction_sequence, eval_script
       }
       @tp_load_script.enable
 
@@ -169,12 +169,17 @@ module DEBUGGER__
       @ui = ui if ui
 
       @tp_thread_begin&.disable
+      @tp_thread_end&.disable
       @tp_thread_begin = nil
-
+      @tp_thread_end = nil
       @ui.activate self, on_fork: on_fork
 
       q = Queue.new
+      first_q = Queue.new
       @session_server = Thread.new do
+        # make sure `@session_server` is assigned
+        first_q.pop; first_q = nil
+
         Thread.current.name = 'DEBUGGER__::SESSION@server'
         Thread.current.abort_on_exception = true
 
@@ -192,10 +197,16 @@ module DEBUGGER__
         end
         @tp_thread_begin.enable
 
+        @tp_thread_end = TracePoint.new(:thread_end) do |tp|
+          @th_clients.delete(Thread.current)
+        end
+        @tp_thread_end.enable
+
         # session start
         q << true
         session_server_main
       end
+      first_q << :ok
 
       q.pop
     end
@@ -205,6 +216,7 @@ module DEBUGGER__
       @thread_stopper.disable
       @tp_load_script.disable
       @tp_thread_begin.disable
+      @tp_thread_end.disable
       @bps.each_value{|bp| bp.disable}
       @th_clients.each_value{|thc| thc.close}
       @tracers.values.each{|t| t.disable}
@@ -219,11 +231,13 @@ module DEBUGGER__
 
       # activate new ui
       @tp_thread_begin.disable
+      @tp_thread_end.disable
       @ui.activate self
       if @ui.respond_to?(:reader_thread) && thc = get_thread_client(@ui.reader_thread)
         thc.mark_as_management
       end
       @tp_thread_begin.enable
+      @tp_thread_end.enable
     end
 
     def pop_event
@@ -329,16 +343,13 @@ module DEBUGGER__
           opt = ev_args[3]
           add_tracer ObjectTracer.new(@ui, obj_id, obj_inspect, **opt)
         else
-          # ignore
+          stop_all_threads
         end
 
         wait_command_loop
 
-      when :dap_result
-        dap_event ev_args # server.rb
-        wait_command_loop
-      when :cdp_result
-        cdp_event ev_args
+      when :protocol_result
+        process_protocol_result ev_args
         wait_command_loop
       end
     end
@@ -889,13 +900,13 @@ module DEBUGGER__
       # * `p <expr>`
       #   * Evaluate like `p <expr>` on the current frame.
       register_command 'p' do |arg|
-        request_tc [:eval, :p, arg.to_s]
+        request_eval :p, arg.to_s
       end
 
       # * `pp <expr>`
       #   * Evaluate like `pp <expr>` on the current frame.
       register_command 'pp' do |arg|
-        request_tc [:eval, :pp, arg.to_s]
+        request_eval :pp, arg.to_s
       end
 
       # * `eval <expr>`
@@ -906,7 +917,7 @@ module DEBUGGER__
           @ui.puts "\nTo evaluate the variable `#{cmd}`, use `pp #{cmd}` instead."
           :retry
         else
-          request_tc [:eval, :call, arg]
+          request_eval :call, arg
         end
       end
 
@@ -917,7 +928,7 @@ module DEBUGGER__
           @ui.puts "not supported on the remote console."
           :retry
         end
-        request_tc [:eval, :irb]
+        request_eval :irb, nil
       end
 
       ### Trace
@@ -1137,7 +1148,7 @@ module DEBUGGER__
         @repl_prev_line = nil
         check_unsafe
 
-        request_tc [:eval, :pp, line]
+        request_eval :pp, line
       end
 
     rescue Interrupt
@@ -1151,6 +1162,11 @@ module DEBUGGER__
       @ui.puts "[REPL ERROR] #{e.inspect}"
       @ui.puts e.backtrace.map{|e| '  ' + e}
       return :retry
+    end
+
+    def request_eval type, src
+      restart_all_threads
+      request_tc [:eval, type, src]
     end
 
     def step_command type, arg
@@ -1320,10 +1336,6 @@ module DEBUGGER__
     end
 
     # breakpoint management
-
-    def bps_pending_until_load?
-      @bps.any?{|key, bp| bp.pending_until_load?}
-    end
 
     def iterate_bps
       deleted_bps = []
@@ -1500,7 +1512,7 @@ module DEBUGGER__
     def clear_line_breakpoints path
       path = resolve_path(path)
       clear_breakpoints do |k, bp|
-        bp.is_a?(LineBreakpoint) && DEBUGGER__.compare_path(k.first, path)
+        bp.is_a?(LineBreakpoint) && bp.path_is?(path)
       end
     rescue Errno::ENOENT
       # just ignore
@@ -1524,7 +1536,7 @@ module DEBUGGER__
     # tracers
 
     def add_tracer tracer
-      if @tracers.has_key? tracer.key
+      if @tracers[tracer.key]&.enabled?
         tracer.disable
         @ui.puts "Duplicated tracer: #{tracer}"
       else
@@ -1724,24 +1736,25 @@ module DEBUGGER__
       file_path, reloaded = @sr.add(iseq, src)
       @ui.event :load, file_path, reloaded
 
-      pending_line_breakpoints = @bps.find_all do |key, bp|
-        LineBreakpoint === bp && !bp.iseq
-      end
-
-      pending_line_breakpoints.each do |_key, bp|
-        if DEBUGGER__.compare_path(bp.path, (iseq.absolute_path || iseq.path))
-          bp.try_activate iseq
-        end
-      end
-
-      if reloaded
-        @bps.find_all do |key, bp|
-          LineBreakpoint === bp && DEBUGGER__.compare_path(bp.path, file_path)
+      # check breakpoints
+      if file_path
+        @bps.find_all do |_key, bp|
+          LineBreakpoint === bp && bp.path_is?(file_path)
         end.each do |_key, bp|
-          @bps.delete bp.key # to allow duplicate
-          if nbp = LineBreakpoint.copy(bp, iseq)
-            add_bp nbp
+          if !bp.iseq
+            bp.try_activate iseq
+          elsif reloaded
+            @bps.delete bp.key # to allow duplicate
+            if nbp = LineBreakpoint.copy(bp, iseq)
+              add_bp nbp
+            end
           end
+        end
+      else # !file_path => file_path is not existing
+        @bps.find_all do |_key, bp|
+          LineBreakpoint === bp && !bp.iseq && DEBUGGER__.compare_path(bp.path, (iseq.absolute_path || iseq.path))
+        end.each do |_key, bp|
+          bp.try_activate iseq
         end
       end
     end
@@ -2438,7 +2451,7 @@ module DEBUGGER__
     end
 
     module DaemonInterceptor
-      def daemon
+      def daemon(*args)
         return super unless defined?(SESSION) && SESSION.active?
 
         _, child_hook = __fork_setup_for_debugger(:child)

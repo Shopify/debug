@@ -265,6 +265,8 @@ module DEBUGGER__
       require 'optparse'
       require_relative 'version'
 
+      have_shown_version = false
+
       opt = OptionParser.new do |o|
         o.banner = "#{$0} [options] -- [debuggee options]"
         o.separator ''
@@ -372,6 +374,16 @@ module DEBUGGER__
         o.separator ''
         o.separator 'Other options:'
 
+        o.on('-v', 'Show version number') do
+          puts o.ver
+          have_shown_version = true
+        end
+
+        o.on('--version', 'Show version number and exit') do
+          puts o.ver
+          exit
+        end
+
         o.on("-h", "--help", "Print help") do
           puts o
           exit
@@ -394,6 +406,14 @@ module DEBUGGER__
       end
 
       opt.parse!(argv)
+
+      if argv.empty?
+        case
+        when have_shown_version && config[:mode] == :start
+          pp config
+          exit
+        end
+      end
 
       config
     end
@@ -425,8 +445,9 @@ module DEBUGGER__
     unless (dir_uid = fs.uid) == (uid = Process.uid)
       raise "#{path} uid is #{dir_uid}, but Process.uid is #{uid}"
     end
-    unless (dir_mode = fs.mode) == 040700 # 4: dir, 7:rwx
-      raise "#{path}'s mode is #{dir_mode.to_s(8)} (should be 040700)"
+
+    if fs.world_writable? && !fs.sticky?
+      raise "#{path} is world writable but not sticky"
     end
 
     path

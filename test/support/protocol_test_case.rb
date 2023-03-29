@@ -206,7 +206,7 @@ module DEBUGGER__
       close_reader
     end
 
-    def assert_locals_result expected, frame_idx: 0
+    def gather_variables(frame_idx: 0, type: "locals")
       case get_target_ui
       when 'vscode'
         # get frameId
@@ -219,31 +219,39 @@ module DEBUGGER__
         # get variablesReference
         res = send_dap_request 'scopes', frameId: f_id
 
-        locals_scope = res.dig(:body, :scopes).find { |d| d[:presentationHint] == "locals" }
+        locals_scope = res.dig(:body, :scopes).find { |d| d[:presentationHint] == type }
         locals_reference = locals_scope[:variablesReference]
 
         # get variables
         res = send_dap_request 'variables', variablesReference: locals_reference
+        res.dig(:body, :variables).map { |loc| { name: loc[:name], value: loc[:value], type: loc[:type], variablesReference: loc[:variablesReference] } }
+      when 'chrome'
+        current_frame = @crt_frames.first
+        locals_scope = current_frame[:scopeChain].find { |f| f[:type] == type }
+        object_id = locals_scope.dig(:object, :objectId)
+
+        res = send_cdp_request "Runtime.getProperties", objectId: object_id
+
+        res.dig(:result, :result).map do |loc|
+          type = loc.dig(:value, :className) || loc.dig(:value, :type).capitalize # TODO: sync this with get_ruby_type
+
+          { name: loc[:name], value: loc.dig(:value, :description), type: type }
+        end
+      end
+    end
+
+    def assert_locals_result expected, frame_idx: 0
+      case get_target_ui
+      when 'vscode'
+        actual_locals = gather_variables(frame_idx: frame_idx, type: "locals")
 
         expected.each do |exp|
           if exp[:type] == "String"
             exp[:value] = exp[:value].inspect
           end
         end
-
-        actual_locals = res.dig(:body, :variables).map { |loc| { name: loc[:name], value: loc[:value], type: loc[:type] } }
       when 'chrome'
-        current_frame = @crt_frames.first
-        locals_scope = current_frame[:scopeChain].find { |f| f[:type] == "local" }
-        object_id = locals_scope.dig(:object, :objectId)
-
-        res = send_cdp_request "Runtime.getProperties", objectId: object_id
-
-        actual_locals = res.dig(:result, :result).map do |loc|
-          type = loc.dig(:value, :className) || loc.dig(:value, :type).capitalize # TODO: sync this with get_ruby_type
-
-          { name: loc[:name], value: loc.dig(:value, :description), type: type }
-        end
+        actual_locals = gather_variables(type: "local")
       end
 
       failure_msg = FailureMessage.new{create_protocol_message "result:\n#{JSON.pretty_generate res}"}
@@ -334,13 +342,16 @@ module DEBUGGER__
 
       attach_to_dap_server
       scenario.call
+    rescue Test::Unit::AssertionFailedError => e
+      is_assertion_failure = true
+      raise e
     ensure
-      @reader_thread&.kill
-      @sock&.close
-      kill_remote_debuggee test_info
-      if name = test_info.failed_process
+      if kill_remote_debuggee(test_info) && !is_assertion_failure
         flunk create_protocol_message "Expected the debuggee program to finish"
       end
+      # Because the debuggee may be terminated by executing the following operations, we need to run them after `kill_remote_debuggee` method.
+      @reader_thread&.kill
+      @sock&.close
     end
 
     def execute_cdp_scenario_ scenario
@@ -364,13 +375,16 @@ module DEBUGGER__
       res = find_response :method, 'Debugger.paused', 'C<D'
       @crt_frames = res.dig(:params, :callFrames)
       scenario.call
+    rescue Test::Unit::AssertionFailedError => e
+      is_assertion_failure = true
+      raise e
     ensure
-      @reader_thread&.kill
-      @web_sock&.close
-      kill_remote_debuggee test_info
-      if name = test_info.failed_process
+      if kill_remote_debuggee(test_info) && !is_assertion_failure
         flunk create_protocol_message "Expected the debuggee program to finish"
       end
+      # Because the debuggee may be terminated by executing the following operations, we need to run them after `kill_remote_debuggee` method.
+      @reader_thread&.kill
+      @web_sock&.close
     end
 
     def execute_cdp_scenario scenario
@@ -1065,4 +1079,3 @@ module DEBUGGER__
     end
   end
 end
-
