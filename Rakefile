@@ -35,9 +35,14 @@ task :check_readme do
   end
 end
 
+desc "Run debug.gem test-framework tests"
+Rake::TestTask.new(:test_test) do |t|
+  t.test_files = FileList["test/support/*_test.rb"]
+end
+
 desc "Run all debugger console related tests"
 Rake::TestTask.new(:test_console) do |t|
-  t.test_files = FileList["test/console/*_test.rb", "test/support/*_test.rb"]
+  t.test_files = FileList["test/console/*_test.rb"]
 end
 
 desc "Run all debugger protocols (CAP & DAP) related tests"
@@ -49,4 +54,4 @@ task test: 'test_console' do
   warn '`rake test` doesn\'t run protocol tests. Use `rake test_all` to test all.'
 end
 
-task test_all: [:test_console, :test_protocol]
+task test_all: [:test_test, :test_console, :test_protocol]

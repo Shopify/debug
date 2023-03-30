@@ -54,6 +54,10 @@ module DEBUGGER__
       @tracer.disable
     end
 
+    def enabled?
+      @tracer.enabled?
+    end
+
     def description
       nil
     end
@@ -83,11 +87,6 @@ module DEBUGGER__
         @output.puts buff
         @output.flush
       end
-    end
-
-    def puts msg
-      @output.puts msg
-      @output.flush
     end
 
     def minfo tp
