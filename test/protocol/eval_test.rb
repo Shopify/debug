@@ -59,23 +59,56 @@ module DEBUGGER__
   end
 
   class EvaluateThreadTest < ProtocolTestCase
-    PROGRAM = <<~RUBY
-      1| th0 = Thread.new{sleep}
-      2| m = Mutex.new; q = Queue.new
-      3| th1 = Thread.new do
-      4|   m.lock; q << true
-      5|   sleep 1
-      6|   m.unlock
-      7| end
-      8| q.pop # wait for locking
-      9| p :ok
-    RUBY
+    def test_eval_doesnt_deadlock
+      program = <<~RUBY
+        1| th0 = Thread.new{sleep}
+        2| m = Mutex.new; q = Queue.new
+        3| th1 = Thread.new do
+        4|   m.lock; q << true
+        5|   sleep 1
+        6|   m.unlock
+        7| end
+        8| q.pop # wait for locking
+        9| p :ok
+      RUBY
 
-    def test_eval_with_threads
-      run_protocol_scenario PROGRAM, cdp: false do
+      run_protocol_scenario program, cdp: false do
         req_add_breakpoint 9
         req_continue
         assert_repl_result({value: 'false', type: 'FalseClass'}, 'm.lock.nil?', frame_idx: 0)
+        req_continue
+      end
+    end
+
+    def test_eval_stops_threads_after_finished
+      program = <<~RUBY
+     1| count = 0
+     2| m = Thread::Mutex.new
+     3| m.lock
+     4|
+     5| th0 = Thread.new do
+     6|   loop do
+     7|     m.synchronize do
+     8|       count += 1
+     9|       p :th0
+    10|     end
+    11|   end
+    12| end
+    13|
+    14| __LINE__
+      RUBY
+
+      run_protocol_scenario program, cdp: false do
+        req_add_breakpoint 14
+        req_continue
+        assert_repl_result({value: 'false', type: 'FalseClass'}, 'm.unlock.nil?', frame_idx: 0)
+        locals = gather_variables
+        count_var_value_1 = locals.find{|v| v[:name] == 'count'}[:value]
+        locals = gather_variables
+        count_var_value_2 = locals.find{|v| v[:name] == 'count'}[:value]
+        # if the thread is stopped, the value of count will not be changed.
+        assert_equal(count_var_value_1, count_var_value_2)
+
         req_continue
       end
     end
