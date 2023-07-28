@@ -6,6 +6,8 @@ require 'tmpdir'
 require 'fileutils'
 require_relative 'variable'
 require_relative 'variable_inspector'
+require "active_support/core_ext/hash/keys.rb"
+require "yaml"
 
 module DEBUGGER__
   module UI_DAP
@@ -215,6 +217,9 @@ module DEBUGGER__
       if sock = @sock
         kw[:seq] = @seq += 1
         str = JSON.dump(kw)
+        $stderr.puts("send")
+        $stderr.puts(kw.deep_stringify_keys.to_yaml)
+        $stderr.puts("\n\n")
         @send_lock.synchronize do
           sock.write "Content-Length: #{str.bytesize}\r\n\r\n#{str}"
         end
@@ -225,20 +230,15 @@ module DEBUGGER__
     end
 
     def send_response req, success: true, message: nil, **kw
-      if kw.empty?
-        send type: 'response',
-             command: req['command'],
-             request_seq: req['seq'],
-             success: success,
-             message: message || (success ? 'Success' : 'Failed')
-      else
-        send type: 'response',
-             command: req['command'],
-             request_seq: req['seq'],
-             success: success,
-             message: message || (success ? 'Success' : 'Failed'),
-             body: kw
-      end
+      payload = {
+        type: 'response',
+        command: req['command'],
+        request_seq: req['seq'],
+        success: success,
+      }
+      payload[:message] = message unless message.nil?
+      payload[:body] = kw unless kw.empty?
+      send **payload
     end
 
     def send_event name, **kw
@@ -724,11 +724,11 @@ module DEBUGGER__
         @ui.respond req, result
       when :scope
         tid = result.delete :tid
-        register_vars result[:variables], tid
+        register_vars result[:variables], tid if result.fetch(:success, true)
         @ui.respond req, result
       when :variable
         tid = result.delete :tid
-        register_vars result[:variables], tid
+        register_vars result[:variables], tid if result.fetch(:success, true)
         @ui.respond req, result
       when :evaluate
         stop_all_threads
@@ -859,34 +859,64 @@ module DEBUGGER__
           expensive: false,
         }]
       when :scope
-        fid = args.shift
-        frame = get_frame(fid)
-        vars = collect_locals(frame).map do |var, val|
-          render_variable Variable.new(name: var, value: val)
-        end
-
-        event! :protocol_result, :scope, req, variables: vars, tid: self.id
-      when :variable
-        vid = args.shift
-
-        if @var_map.has_key?(vid)
-          obj = @var_map[vid]
-
-          members = case req.dig('arguments', 'filter')
-          when 'indexed'
-            VariableInspector.new.indexed_members_of(
-              obj,
-              start: req.dig('arguments', 'start') || 0,
-              count: req.dig('arguments', 'count') || obj.size,
-            )
-          else
-            VariableInspector.new.named_members_of(obj)
+        begin
+          fid = args.shift
+          frame = get_frame(fid)
+          vars = collect_locals(frame).map do |var, val|
+            render_variable Variable.new(name: var, value: val)
           end
 
-          vars = members.map { |member| render_variable member }
+          event! :protocol_result, :scope, req, variables: vars, tid: self.id
+        rescue
+          # See
+          # https://microsoft.github.io/debug-adapter-protocol/specification#errorresponse
+          # https://microsoft.github.io/debug-adapter-protocol/specification#message
+          error = {
+            id: 1,
+            format: "Hello, world! {request_type}",
+            variables: { request_type: type },
+            showUser: true,
+            url: "www.google.com",
+            urlLabel: "Google",
+          }
+          event! :protocol_result, :scope, req, success: false, error: error
         end
-        event! :protocol_result, :variable, req, variables: (vars || []), tid: self.id
+      when :variable
+        begin
+          vid = args.shift
 
+          if @var_map.has_key?(vid)
+            obj = @var_map[vid]
+
+            members = case req.dig('arguments', 'filter')
+            when 'indexed'
+              raise "Boom 2"
+              VariableInspector.new.indexed_members_of(
+                obj,
+                start: req.dig('arguments', 'start') || 0,
+                count: req.dig('arguments', 'count') || obj.size,
+              )
+            else
+              VariableInspector.new.named_members_of(obj)
+            end
+
+            vars = members.map { |member| render_variable member }
+          end
+          event! :protocol_result, :variable, req, variables: (vars || []), tid: self.id
+        rescue
+          # See
+          # https://microsoft.github.io/debug-adapter-protocol/specification#errorresponse
+          # https://microsoft.github.io/debug-adapter-protocol/specification#message
+          error = {
+            id: 2,
+            format: "Hello, world! {request_type}",
+            variables: { request_type: type },
+            showUser: true,
+            url: "www.google.com",
+            urlLabel: "Google",
+          }
+          event! :protocol_result, :variable, req, success: false, error: error
+        end
       when :evaluate
         fid, expr, context = args
         frame = get_frame(fid)

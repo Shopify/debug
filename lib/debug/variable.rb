@@ -7,6 +7,10 @@ module DEBUGGER__
     attr_reader :name, :value
 
     def initialize(name:, value:, internal: false)
+      if (name.to_s == 'this_crashes' || name.to_s == '"this_crashes"') && value.is_a?(Integer) && value.even?
+        raise "Boom! 1"
+      end
+
       @name = name
       @value = value
       @is_internal = internal
