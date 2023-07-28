@@ -19,6 +19,7 @@ module DEBUGGER__
 
       members = case obj
       when Hash then obj.map { |k, v| Variable.new(name: value_inspect(k), value: v) }
+      when Hash then obj.map { |k, v| Variable.new(name: inspect_hash_key(k), value: v) }
       when Struct then obj.members.map { |name| Variable.new(name: name, value: obj[name]) }
       when String
         members = [
@@ -49,6 +50,13 @@ module DEBUGGER__
     end
 
     private
+
+    def inspect_hash_key(key)
+      # Special-case for symbols so debugger UIs render `a: 1` instead of two colons like `:a: 1`
+      return key.to_s if key.is_a?(Symbol)
+
+      value_inspect(key)
+    end
 
     def value_inspect(obj, short: true)
       self.class.value_inspect(obj, short: short)
