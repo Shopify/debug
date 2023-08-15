@@ -1,4 +1,9 @@
-[![Ruby](https://github.com/ruby/debug/actions/workflows/ruby.yml/badge.svg?branch=master)](https://github.com/ruby/debug/actions/workflows/ruby.yml?query=branch%3Amaster) [![Protocol](https://github.com/ruby/debug/actions/workflows/protocol.yml/badge.svg)](https://github.com/ruby/debug/actions/workflows/protocol.yml)
+# Important
+
+The default branch for this fork is set to `issues-workaround`.
+This branch is used for critical fixes for Shopify that are not yet available in a released version of the `debug` gem. 
+
+---
 
 # debug.rb
 
