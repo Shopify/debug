@@ -254,7 +254,7 @@ module DEBUGGER__
         actual_locals = gather_variables(type: "local")
       end
 
-      failure_msg = FailureMessage.new{create_protocol_message "result:\n#{JSON.pretty_generate res}"}
+      failure_msg = FailureMessage.new{create_protocol_message "Locals comparison failed:\n"}
 
       actual_locals = actual_locals.sort_by { |h| h[:name] }
       expected = expected.sort_by { |h| h[:name] }
