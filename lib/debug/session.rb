@@ -342,10 +342,8 @@ module DEBUGGER__
           obj_inspect = ev_args[2]
           opt = ev_args[3]
           add_tracer ObjectTracer.new(@ui, obj_id, obj_inspect, **opt)
-        # We don't want to stop threads because it could cause deadlock with reline
-        # https://github.com/ruby/debug/issues/877#issuecomment-1516661829
-        # else
-          # stop_all_threads
+        else
+          stop_all_threads
         end
 
         wait_command_loop
@@ -1700,8 +1698,6 @@ module DEBUGGER__
         DEBUGGER__.debug{ "Enter subsession (nested #{@subsession_stack.size})" }
       else
         DEBUGGER__.debug{ "Enter subsession" }
-        # We don't want to stop threads because it could cause deadlock with reline
-        # https://github.com/ruby/debug/issues/877#issuecomment-1516661829
         # stop_all_threads
         @process_group.lock
       end
