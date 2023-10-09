@@ -1038,13 +1038,14 @@ module DEBUGGER__
           when :call
             result = frame_eval(eval_src)
           when :irb
-            require 'irb' # prelude's binding.irb doesn't have show_code option
-            begin
-              result = frame_eval('binding.irb(show_code: false)', binding_location: true)
-            ensure
-              # workaround: https://github.com/ruby/debug/issues/308
-              Reline.prompt_proc = nil if defined? Reline
-            end
+            require "irb"
+            IRB.setup(location, argv: [])
+            workspace = IRB::WorkSpace.new(current_frame&.binding || TOPLEVEL_BINDING)
+            irb = IRB::Irb.new(workspace)
+            IRB.conf[:MAIN_CONTEXT] = irb.context
+            IRB::Debug.send(:configure_irb_for_debugger, irb)
+            SESSION.reset_ui(IRB::Debug::UI.new(thread, irb))
+            IRB::Debug.setup(irb)
           when :display, :try_display
             failed_results = []
             eval_src.each_with_index{|src, i|
