@@ -7,6 +7,21 @@
 # Otherwise, UNIX domain socket is used.
 #
 
+require "zeitwerk"
+
+loader = Zeitwerk::Loader.for_gem(warn_on_extra_files: false)
+loader.ignore(
+  "lib/debug/start.rb",
+  "lib/debug/open.rb",
+  "lib/debug/open_nonstop.rb",
+  "lib/debug/prelude.rb",
+  "lib/debug/dap_custom/traceInspector.rb"
+)
+loader.enable_reloading
+loader.setup
+loader.log!
+puts "Zeitwerk configured!"
+
 require_relative 'session'
 return unless defined?(DEBUGGER__)
 
