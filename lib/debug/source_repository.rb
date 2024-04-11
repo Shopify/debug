@@ -24,7 +24,7 @@ module DEBUGGER__
 
     if defined?(RubyVM.keep_script_lines)
       # Ruby 3.1 and later
-      RubyVM.keep_script_lines = true
+      # RubyVM.keep_script_lines = true
       require 'objspace'
 
       def initialize
